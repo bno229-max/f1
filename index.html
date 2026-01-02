@@ -3,17 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Brick Game F1 - Classic Fidelity V8.0</title>
+    <title>Brick Game F1 - Senna V10.0</title>
     <style>
         body { 
             background: #222; display: flex; flex-direction: column; justify-content: center; 
             align-items: center; min-height: 100vh; margin: 0; font-family: 'Courier New', monospace;
-            touch-action: manipulation;
+            touch-action: manipulation; overflow: hidden;
         }
         #console { 
             background: #f1c40f; border-radius: 15px; padding: 20px; 
             border-bottom: 12px solid #d4ac0d; box-shadow: 0 10px 0 #000;
             width: 250px; text-align: center;
+        }
+        .shake { animation: shake 0.2s ease-in-out; }
+        @keyframes shake {
+            0%, 100% { transform: translate(0,0); }
+            25% { transform: translate(4px,4px); }
+            50% { transform: translate(-4px,-4px); }
         }
         #screen-border { 
             background: #8b956d; padding: 12px; border: 8px solid #333; 
@@ -23,20 +29,19 @@
             background: #94a074; display: block; image-rendering: pixelated; 
             width: 100%; height: auto; border: 1px solid rgba(0,0,0,0.2);
         }
-        .hud { display: flex; justify-content: space-between; color: #111; font-weight: bold; margin-bottom: 8px; font-size: 16px; }
-        .mobile-controls { display: flex; flex-direction: column; align-items: center; margin-top: 25px; gap: 20px; }
-        .dpad { display: flex; gap: 20px; }
+        .hud { display: flex; justify-content: space-between; color: #111; font-weight: bold; margin-bottom: 8px; font-size: 13px; }
+        .mobile-controls { display: flex; flex-direction: column; align-items: center; margin-top: 20px; gap: 15px; }
+        .dpad { display: flex; gap: 30px; }
         .btn { 
             background: #333; color: white; border: none; border-radius: 50%; 
-            width: 70px; height: 70px; font-size: 24px;
-            box-shadow: 0 6px 0 #000; display: flex; align-items: center; justify-content: center;
-            user-select: none; -webkit-tap-highlight-color: transparent;
+            width: 80px; height: 80px; font-size: 30px; box-shadow: 0 6px 0 #000;
+            display: flex; align-items: center; justify-content: center;
         }
         .btn:active { transform: translateY(3px); box-shadow: 0 3px 0 #000; }
         .action-row { display: flex; gap: 15px; }
         .btn-small { 
-            background: #c0392b; border-radius: 50%; width: 50px; height: 50px; 
-            font-size: 10px; box-shadow: 0 4px 0 #7b241c; color: white; border: none; cursor: pointer;
+            background: #c0392b; border-radius: 50%; width: 55px; height: 55px; 
+            font-size: 11px; box-shadow: 0 4px 0 #7b241c; color: white; border: none;
         }
         .btn-green { background: #27ae60; box-shadow: 0 4px 0 #1e8449; }
     </style>
@@ -45,17 +50,18 @@
 
 <div id="console">
     <div class="hud">
-        <span>LVL:<span id="level">1</span>/10</span>
+        <span>LVL:<span id="level">1</span></span>
+        <span>HI:<span id="hiScore">0</span></span>
         <span>PTS:<span id="score">0</span></span>
+        <span>❤️:<span id="lives">3</span></span>
     </div>
     <div id="screen-border">
         <canvas id="gameCanvas" width="210" height="400"></canvas>
     </div>
-
     <div class="mobile-controls">
         <div class="dpad">
-            <div class="btn" id="leftBtn">◀</div>
-            <div class="btn" id="rightBtn">▶</div>
+            <button class="btn" id="leftBtn">◀</button>
+            <button class="btn" id="rightBtn">▶</button>
         </div>
         <div class="action-row">
             <button class="btn btn-small btn-green" id="startBtn">START</button>
@@ -67,24 +73,26 @@
 <script>
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
-    const scoreDisplay = document.getElementById("score");
-    const levelDisplay = document.getElementById("level");
+    const scoreDisplay = document.getElementById("score"), levelDisplay = document.getElementById("level");
+    const hiScoreDisplay = document.getElementById("hiScore"), livesDisplay = document.getElementById("lives");
+    const consoleElem = document.getElementById("console");
 
     const COLS = 3, LANE_WIDTH = canvas.width / COLS, BLOCK = 18;
-    let score = 0, level = 1, playerLane = 1, enemies = [], coins = [], frameCount = 0;
+    let score = 0, level = 1, lives = 3, playerLane = 1, lastLane = 1, enemies = [], coins = [], frameCount = 0;
     let gameActive = false, isPaused = false, currentSpeed = 80, gameLoop;
-    let uiMessage = "START", isGameOver = false;
+    let uiMessage = "START", isGameOver = false, invulFrames = 0;
+    let hiScore = localStorage.getItem("brickGameHiScore") || 0;
+    hiScoreDisplay.innerText = hiScore;
 
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const sennaTheme = [392, 523, 659, 783, 0, 659, 783, 0, 659, 783, 880, 783, 698, 659, 587, 0];
     let noteIndex = 0;
 
     function playSound(freq, type, duration, vol = 0.05) {
-        if (isPaused || !gameActive || freq === 0) return;
+        if (isPaused || freq === 0) return;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.type = type; osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
         gain.gain.setValueAtTime(vol, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
         osc.connect(gain); gain.connect(audioCtx.destination);
@@ -94,138 +102,121 @@
     function drawBrick(x, y, opacity = 1, isCoin = false) {
         ctx.fillStyle = isCoin ? `rgba(17, 17, 17, ${Math.abs(Math.sin(frameCount/3))})` : `rgba(17, 17, 17, ${opacity})`;
         ctx.fillRect(x + 1, y + 1, BLOCK - 2, BLOCK - 2);
-        ctx.strokeStyle = "rgba(0,0,0,0.1)";
         ctx.strokeRect(x, y, BLOCK, BLOCK);
     }
 
-    // VOLTA DO CARRO CLÁSSICO DETALHADO (7 BLOCOS)
-    function drawCar(lane, y, isPlayer = false) {
+    // VERSÃO CLÁSSICA VALIDADA (7 BLOCOS)
+    function drawCar(lane, y, opacity = 1) {
         const x = lane * LANE_WIDTH + (LANE_WIDTH/2) - (BLOCK/2);
-        const alpha = isPlayer ? 1 : 0.85;
-        // Desenho clássico: Ponta, Meio(3 blocos), Motor, Base(3 blocos)
-        drawBrick(x, y, alpha); // Frente
-        drawBrick(x-BLOCK, y+BLOCK, alpha); drawBrick(x, y+BLOCK, alpha); drawBrick(x+BLOCK, y+BLOCK, alpha); // Eixo frente
-        drawBrick(x, y+(BLOCK*2), alpha); // Cockpit
-        drawBrick(x-BLOCK, y+(BLOCK*3), alpha); drawBrick(x, y+(BLOCK*3), alpha); drawBrick(x+BLOCK, y+(BLOCK*3), alpha); // Eixo traseiro
+        drawBrick(x, y, opacity); 
+        drawBrick(x-BLOCK, y+BLOCK, opacity); drawBrick(x, y+BLOCK, opacity); drawBrick(x+BLOCK, y+BLOCK, opacity);
+        drawBrick(x, y+(BLOCK*2), opacity);
+        drawBrick(x-BLOCK, y+(BLOCK*3), opacity); drawBrick(x, y+(BLOCK*3), opacity); drawBrick(x+BLOCK, y+(BLOCK*3), opacity);
     }
 
     function update() {
-        if (!gameActive || isPaused) { 
-            drawOverlay(); 
-            return; 
-        }
-
+        if (!gameActive || isPaused) { drawOverlay(); return; }
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         frameCount++;
+        if (invulFrames > 0) invulFrames--;
 
         if (frameCount % 6 === 0) {
             playSound(sennaTheme[noteIndex], 'square', 0.2);
             noteIndex = (noteIndex + 1) % sennaTheme.length;
         }
 
+        // EFEITO DE RASTRO (GHOSTING) NO JOGADOR
+        if (playerLane !== lastLane) {
+            drawCar(lastLane, canvas.height - 80, 0.2); // Sombra onde o carro estava
+            if (frameCount % 2 === 0) lastLane = playerLane; // Suaviza a transição
+        }
+
         let spawnRate = Math.max(10, 30 - (level * 2));
-        if (frameCount % Math.floor(spawnRate) === 0) {
-            enemies.push({ lane: Math.floor(Math.random() * 3), y: -BLOCK * 4 });
-        }
+        if (frameCount % Math.floor(spawnRate) === 0) enemies.push({ lane: Math.floor(Math.random() * 3), y: -BLOCK * 4 });
+        if (frameCount % 100 === 0 && Math.random() > 0.7) coins.push({ lane: Math.floor(Math.random() * 3), y: -BLOCK });
 
-        if (frameCount % 100 === 0 && Math.random() > 0.7) {
-            coins.push({ lane: Math.floor(Math.random() * 3), y: -BLOCK });
-        }
+        coins.forEach((c, i) => {
+            c.y += (BLOCK / 3) + (level * 0.2);
+            if (c.lane === playerLane && c.y > canvas.height - 80 && c.y < canvas.height - 20) {
+                score += 30; playSound(1200, 'sine', 0.1, 0.1); coins.splice(i, 1); checkLevel();
+            } else if (c.y > canvas.height) coins.splice(i, 1);
+            else drawBrick(c.lane * LANE_WIDTH + (LANE_WIDTH/2) - (BLOCK/2), c.y, 1, true);
+        });
 
-        // Moedas
-        for (let i = coins.length - 1; i >= 0; i--) {
-            coins[i].y += (BLOCK / 3) + (level * 0.2);
-            if (coins[i].lane === playerLane && coins[i].y > canvas.height - 80 && coins[i].y < canvas.height - 20) {
-                score += 30; scoreDisplay.innerText = score;
-                playSound(1200, 'sine', 0.1, 0.1);
-                coins.splice(i, 1); checkLevel(); continue;
-            }
-            if (coins[i].y > canvas.height) coins.splice(i, 1);
-            else drawBrick(coins[i].lane * LANE_WIDTH + (LANE_WIDTH/2) - (BLOCK/2), coins[i].y, 1, true);
-        }
-
-        // Inimigos com colisão precisa
-        for (let i = enemies.length - 1; i >= 0; i--) {
-            enemies[i].y += (BLOCK / 4) + (level * 0.4); 
-            
-            // Colisão ajustada para o tamanho real do carro clássico
-            if (enemies[i].lane === playerLane && enemies[i].y + (BLOCK * 4) > canvas.height - 80 && enemies[i].y < canvas.height - 20) {
-                gameOver();
-                return; // Para o update imediatamente
-            }
-
-            if (enemies[i].y > canvas.height) {
-                score += 10; scoreDisplay.innerText = score;
-                enemies.splice(i, 1);
-                checkLevel();
+        enemies.forEach((e, i) => {
+            e.y += (BLOCK / 4) + (level * 0.4); 
+            if (invulFrames === 0 && e.lane === playerLane && e.y + (BLOCK * 4) > canvas.height - 80 && e.y < canvas.height - 20) {
+                hit();
+            } else if (e.y > canvas.height) {
+                score += 10; enemies.splice(i, 1); checkLevel();
             } else {
-                drawCar(enemies[i].lane, enemies[i].y);
+                drawCar(e.lane, e.y, 0.85);
             }
-        }
-        drawCar(playerLane, canvas.height - 80, true);
+        });
+
+        // Carro do jogador com efeito de invulnerabilidade
+        let pAlpha = (invulFrames > 0 && frameCount % 4 < 2) ? 0.2 : 1;
+        drawCar(playerLane, canvas.height - 80, pAlpha);
         
+        scoreDisplay.innerText = score;
         if (uiMessage !== "") drawScreenText(uiMessage);
     }
 
+    function hit() {
+        lives--; livesDisplay.innerText = lives;
+        consoleElem.classList.add('shake');
+        setTimeout(() => consoleElem.classList.remove('shake'), 200);
+        playSound(150, 'sawtooth', 0.4, 0.1);
+        if (lives <= 0) gameOver(); else { invulFrames = 60; enemies = []; }
+    }
+
     function checkLevel() {
+        if (score > hiScore) { hiScore = score; hiScoreDisplay.innerText = hiScore; localStorage.setItem("brickGameHiScore", hiScore); }
         if (score > 0 && score % 100 === 0 && level < 10) levelUp();
     }
 
     function drawOverlay() {
-        // Mantém os carros visíveis ao fundo no Game Over
-        if (isGameOver) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            enemies.forEach(e => drawCar(e.lane, e.y));
-            drawCar(playerLane, canvas.height - 80, true);
-            drawScreenText("FIM JOGO");
-        } else if (isPaused) {
-            drawScreenText("PAUSA");
-        } else {
-            drawScreenText(uiMessage);
-        }
+        if (isGameOver) drawScreenText("FIM JOGO");
+        else if (isPaused) drawScreenText("PAUSA");
+        else { ctx.clearRect(0,0,canvas.width,canvas.height); drawScreenText(uiMessage); }
     }
 
     function drawScreenText(text) {
-        ctx.fillStyle = "rgba(0,0,0,0.2)";
-        ctx.fillRect(0, canvas.height/2 - 25, canvas.width, 50);
+        ctx.fillStyle = "rgba(0,0,0,0.1)";
+        ctx.fillRect(0, canvas.height/2 - 30, canvas.width, 60);
         ctx.fillStyle = "#111";
-        ctx.font = "bold 24px Courier New";
-        ctx.textAlign = "center";
-        ctx.fillText(text, canvas.width/2, canvas.height/2 + 8);
+        ctx.font = "bold 24px Courier New"; ctx.textAlign = "center";
+        ctx.fillText(text, canvas.width/2, canvas.height/2 + 10);
     }
 
     function levelUp() {
         level++; levelDisplay.innerText = level;
         currentSpeed = Math.max(25, 80 - (level * 6)); 
         uiMessage = "LEVEL " + level;
-        clearInterval(gameLoop);
-        gameLoop = setInterval(update, currentSpeed);
+        clearInterval(gameLoop); gameLoop = setInterval(update, currentSpeed);
         playSound(800, 'square', 0.3);
         setTimeout(() => { if(gameActive) uiMessage = ""; }, 1500);
     }
 
     function gameOver() {
-        gameActive = false;
-        isGameOver = true;
-        playSound(100, 'sawtooth', 0.6);
-        clearInterval(gameLoop);
-        drawOverlay(); // Força o desenho da mensagem no momento da batida
+        gameActive = false; isGameOver = true;
+        playSound(80, 'sawtooth', 0.8); clearInterval(gameLoop);
+        drawOverlay();
     }
 
     function move(dir) {
         if (!gameActive || isPaused) return;
+        lastLane = playerLane; // Registra posição para o efeito de rastro
         if (dir === 'L' && playerLane > 0) { playerLane--; playSound(440, 'sine', 0.05); }
         if (dir === 'R' && playerLane < 2) { playerLane++; playSound(440, 'sine', 0.05); }
     }
 
     function startGame() {
         if (audioCtx.state === 'suspended') audioCtx.resume();
-        score = 0; level = 1; enemies = []; coins = []; playerLane = 1; noteIndex = 0;
-        scoreDisplay.innerText = "0"; levelDisplay.innerText = "1";
-        gameActive = true; isPaused = false; isGameOver = false; currentSpeed = 80;
-        uiMessage = "";
-        clearInterval(gameLoop);
-        gameLoop = setInterval(update, currentSpeed);
+        score = 0; level = 1; lives = 3; enemies = []; coins = []; playerLane = 1; lastLane = 1;
+        scoreDisplay.innerText = "0"; levelDisplay.innerText = "1"; livesDisplay.innerText = "3";
+        gameActive = true; isPaused = false; isGameOver = false; currentSpeed = 80; uiMessage = ""; invulFrames = 0;
+        clearInterval(gameLoop); gameLoop = setInterval(update, currentSpeed);
     }
 
     document.getElementById("leftBtn").addEventListener("touchstart", (e) => { e.preventDefault(); move('L'); });
@@ -234,7 +225,6 @@
     document.getElementById("rightBtn").addEventListener("mousedown", (e) => { e.preventDefault(); move('R'); });
     document.getElementById("startBtn").addEventListener("click", startGame);
     document.getElementById("pauseBtn").addEventListener("click", () => { if (gameActive) isPaused = !isPaused; });
-
     drawOverlay();
 </script>
 </body>
